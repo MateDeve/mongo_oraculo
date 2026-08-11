@@ -9,7 +9,7 @@ Trabaja en pasos pequeños. Después de cada cambio ejecuta `npm run typecheck`,
 ## Prompt: elegir mi patrón
 
 ```
-Estoy construyendo un agente [rag | structured | hybrid]. Actualiza src/patterns.ts para
+Estoy construyendo un agente structured. Actualiza src/patterns.ts para
 que mi patrón exponga solo las herramientas que necesita, y ajusta la selección del system
 prompt si hace falta. Deja intactos los otros patrones para poder compararlos. Ejecuta
 npm run typecheck al terminar.
@@ -78,6 +78,7 @@ tomando como modelo el generador bancario existente:
    campo.
 4. Actualiza EVENTS_COLLECTION en .env si el nombre de la colección es distinto.
 Usa solo datos sintéticos, y no toques el cliente del modelo, las credenciales ni el grafo.
+5. Hazme las preguntas necesarias hasta que estes seguro de la tarea
 Ejecuta npm run typecheck y luego guíame por npm run load.
 ```
 

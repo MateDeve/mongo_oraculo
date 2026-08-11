@@ -3,6 +3,8 @@ import { knowledgeBaseSearch } from "./retrieval/retrieverTool";
 import { structuredQuery } from "./query/queryTool";
 import { assess } from "./hybrid/hybridTool";
 import { remember } from "./tools/memoryTools";
+import { desembolsoResumen } from "./tools/desembolsoResumen";
+import { desembolsoGrafica } from "./tools/desembolsoGrafica";
 import type { AgentTool } from "./tools/registry";
 import { RAG_PROMPT, STRUCTURED_PROMPT, HYBRID_PROMPT } from "./agent/prompts/index";
 
@@ -30,7 +32,7 @@ export function toolsForPattern(pattern: Pattern): AgentTool[] {
     case "structured":
       return [structuredQuery, remember];
     case "hybrid":
-      return [knowledgeBaseSearch, structuredQuery, assess, remember];
+      return [knowledgeBaseSearch, structuredQuery, assess, desembolsoResumen, desembolsoGrafica, remember];
   }
 }
 

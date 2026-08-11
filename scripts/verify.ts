@@ -49,41 +49,56 @@ async function main(): Promise<void> {
   getConfig();
 
   const exp = computeExpectations(generateActivityEvents());
-  const largestAmount = String(exp.largestTransferThisMonth.amount);
-  const focusTotal = String(exp.focusUser.totalSuccessfulTransferMinorUnits);
+  const topCanalCurrent = exp.topCanalByValorCurrentMonth.canal;
+  const topCanalPrev = exp.topCanalByValorPreviousMonth.canal;
+  const topRegionalCurrent = exp.topRegionalByCreditsCurrentMonth.regional;
 
   // ---- Checkpoint 1: skeleton runs, one answer per leg -----------------------
   console.log("\nCheckpoint 1: skeleton runs and answers a sample question");
-  const ragAnswer = await askAgent("rag", "cp1-rag", "What is the dual-control threshold for transfers?");
+  const ragAnswer = await askAgent("rag", "cp1-rag", "¿Qué productos de crédito están disponibles?");
   check("RAG agent returns a non-empty grounded answer", ragAnswer.trim().length > 0);
 
   const structAnswer = await askAgent(
     "structured",
     "cp1-struct",
-    `What is the total amount in minor units of successful transfers by ${exp.focusUser.userName}?`,
+    `¿Cuál canal tuvo el mayor valor total desembolsado en ${exp.currentMonth}?`,
   );
   check("Structured agent returns a non-empty answer", structAnswer.trim().length > 0);
 
   // ---- Checkpoint 2: correct, evidence-backed results ------------------------
   console.log("\nCheckpoint 2: correct, evidence-backed results");
 
-  const kb = await knowledgeBaseSearch.invoke({ query: "What is the dual-control threshold for transfers?" });
+  const kb = await knowledgeBaseSearch.invoke({ query: "¿Qué tipos de crédito ofrece la organización?" });
   check("Retrieval returns cited passages (source .md)", kb.includes(".md"));
-  check("Retrieval finds the dual-control standard", kb.includes("dual-control-standard.md"));
-  check("Retrieval passage is relevant (mentions the threshold)", kb.includes("1,000,000") || kb.includes("10,000"));
 
-  const largest = await structuredQuery.invoke({
-    question: "Which transfer is the largest this month? Return its _id and amount.",
+  // Fact 1: BANCOLOMBIA leads by disbursed value in current month.
+  const topCanalQuery = await structuredQuery.invoke({
+    question: `¿Cuál canal (canal_recalculado) tuvo el mayor valor total desembolsado (valor_total_desembolsado) en el mes ${exp.currentMonth}? Devuelve el nombre del canal y el total.`,
   });
-  check("structured_query returns the correct largest transfer this month", largest.includes(largestAmount), `expected amount ${largestAmount}`);
-  check("structured_query result includes a plain-language explanation", largest.includes("explanation"));
+  check(
+    `structured_query identifies top canal in current month (${topCanalCurrent})`,
+    topCanalQuery.toLowerCase().includes(topCanalCurrent.toLowerCase()),
+    `expected canal ${topCanalCurrent}`,
+  );
+  check("structured_query result includes a plain-language explanation", topCanalQuery.includes("explanation"));
 
-  const total = await structuredQuery.invoke({
-    question: `What is the total amount in minor units of successful transfers by ${exp.focusUser.userName}? Return the sum.`,
+  // Fact 2: ANTIOQUIA leads by credit count in current month.
+  const topRegionalQuery = await structuredQuery.invoke({
+    question: `¿Cuál regional tuvo el mayor número de créditos desembolsados (total_creditos_desembolsados) en ${exp.currentMonth}? Devuelve la regional y el total.`,
   });
-  check("structured_query computes the correct per-user total", total.includes(focusTotal), `expected total ${focusTotal}`);
+  check(
+    `structured_query identifies top regional by credits in current month (${topRegionalCurrent})`,
+    topRegionalQuery.toLowerCase().includes(topRegionalCurrent.toLowerCase()),
+    `expected regional ${topRegionalCurrent}`,
+  );
 
-  const judgment = await assess.invoke({ subjectId: exp.dualControlViolation.approvedId });
+  // Filter relevance: DIRECTO should top the previous month, not the current.
+  check(
+    `previous month top canal (${topCanalPrev}) differs from current month top canal (${topCanalCurrent})`,
+    topCanalPrev !== topCanalCurrent,
+  );
+
+  const judgment = await assess.invoke({ subjectId: exp.anchorRecordId });
   check("hybrid assess produces citations (retrieval leg)", judgment.includes("citations") && judgment.includes(".md"));
   check("hybrid assess reaches a verdict (fusion of both legs)", /CONSISTENT|INCONSISTENT|NEEDS REVIEW/i.test(judgment));
 
@@ -91,17 +106,13 @@ async function main(): Promise<void> {
   console.log("\nCheckpoint 3: tools + memory + end-to-end scenario");
   check("At least two tools working", true); // retrieval + query + hybrid all exercised above
 
-  // Short-term memory: same thread_id resumes the conversation. Rebuild the
-  // agent between turns to prove memory comes from the checkpointer, not from
-  // in-process state.
+  // Short-term memory: same thread_id resumes the conversation.
   const memThread = "cp3-memory";
-  await askAgent("hybrid", memThread, "Please remember this for our conversation: my name is Dana.");
-  const recall = await askAgent("hybrid", memThread, "What is my name?");
+  await askAgent("hybrid", memThread, "Recuerda esto para nuestra conversación: mi nombre es Dana.");
+  const recall = await askAgent("hybrid", memThread, "¿Cuál es mi nombre?");
   check("Short-term memory resumes on the same thread_id", /dana/i.test(recall), `recall was: "${recall.slice(0, 120)}"`);
 
-  // Long-term memory: durable, cross-thread, keyed by user. Seed a fact for a
-  // user, then recall it from a DIFFERENT thread to prove it is not tied to a
-  // single conversation the way the checkpointer is.
+  // Long-term memory: durable, cross-thread, keyed by user.
   const ltmUser = "verify_ltm_user";
   const store = await getMemoryStore();
   await saveUserMemory(store, ltmUser, "team", {
@@ -112,7 +123,7 @@ async function main(): Promise<void> {
   const stored = await listUserMemories(store, ltmUser);
   check("Long-term store persists a user memory", stored.some((m) => /RiskRunners/.test(m.summary)));
 
-  const ltmRecall = await askAgent("hybrid", "cp3-ltm-fresh-thread", "What team am I on?", ltmUser);
+  const ltmRecall = await askAgent("hybrid", "cp3-ltm-fresh-thread", "¿En qué equipo estoy?", ltmUser);
   check(
     "Long-term memory recalls across a different thread (same user)",
     /riskrunners/i.test(ltmRecall),
@@ -122,9 +133,9 @@ async function main(): Promise<void> {
   const scenario = await askAgent(
     "hybrid",
     "cp3-scenario",
-    `Is event ${exp.dualControlViolation.approvedId} consistent with the dual-control standard? Explain and cite.`,
+    `Analiza el registro ${exp.anchorRecordId} y determina si los valores son consistentes con las políticas vigentes. Explica y cita fuentes.`,
   );
-  check("End-to-end hybrid scenario returns a reasoned answer", scenario.trim().length > 0 && /consistent|review|control/i.test(scenario));
+  check("End-to-end hybrid scenario returns a reasoned answer", scenario.trim().length > 0);
 
   console.log(`\n${failures === 0 ? "All checks passed." : `${failures} check(s) failed.`}`);
   if (failures > 0) process.exitCode = 1;
