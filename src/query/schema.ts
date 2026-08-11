@@ -45,54 +45,76 @@
  * to get a Spanish `explanation` back.
  */
 
-export const ACTION_TYPES = [
-  "LOGIN",
-  "BALANCE_QUERY",
-  "TRANSFER_INITIATED",
-  "TRANSFER_APPROVED",
-  "USER_CREATED",
-  "USER_MODIFIED",
+export const PRODUCTOS = ["EDUCATIVO", "VEHICULO", "CONSUMO", "MOTO"] as const;
+export type Producto = (typeof PRODUCTOS)[number];
+
+export const CANALES = [
+  "INDEPENDIENTE Y COMERCIALIZADORA",
+  "RENTING",
+  "DIRECTO",
+  "BROKERS",
+  "BANCOLOMBIA",
+  "CONCESIONARIO",
+  "DIGITAL",
+  "ALIADO",
 ] as const;
-export type ActionType = (typeof ACTION_TYPES)[number];
+export type Canal = (typeof CANALES)[number];
 
-export const CHANNELS = ["WEB", "MOBILE", "API", "BRANCH"] as const;
-export type Channel = (typeof CHANNELS)[number];
+export const REGIONALES = ["CENTRO", "SUR", "DIGITAL", "BOGOTA", "ANTIOQUIA", "CARIBE"] as const;
+export type Regional = (typeof REGIONALES)[number];
 
-export const STATUSES = ["SUCCESS", "FAILED", "PENDING"] as const;
-export type Status = (typeof STATUSES)[number];
+export const NUEVO_USADO = ["Nuevo", "Usado", "Reutilizacion"] as const;
+export type NuevoUsado = (typeof NUEVO_USADO)[number];
 
-/** Monetary actions carry a non-zero `amount` (in minor units); others are 0. */
-export const MONETARY_ACTIONS: ReadonlySet<ActionType> = new Set<ActionType>([
-  "TRANSFER_INITIATED",
-  "TRANSFER_APPROVED",
-]);
+const DESEMBOLSOS_DESCRIPTION = `Collection: desembolsos_oraculo
+One document per pre-aggregated disbursement group. Each row is NOT a single credit —
+it is the rolled-up total for a unique combination of categorical fields (product,
+channel, city, campaign, etc.) for one disbursement period. Always aggregate the
+numeric fields; never count documents as if they were individual credits.
 
-const ACTIVITY_EVENTS_DESCRIPTION = `Collection: activity_events
-One document per operational event at the bank. Fields:
-  _id        string   stable id like "evt_0001"
-  userId     string   actor id like "user_03"
-  userName   string   actor display name, e.g. "Priya Nair"
-  action     string   one of: ${ACTION_TYPES.join(", ")}
-  amount     number   money moved in MINOR UNITS (cents). Non-zero only for
-                      ${[...MONETARY_ACTIONS].join(" and ")}; 0 otherwise.
-                      Example: amount 1500000 means 15,000.00 in currency units.
-  channel    string   one of: ${CHANNELS.join(", ")}
-  status     string   one of: ${STATUSES.join(", ")}
-  timestamp  Date     BSON date when the event occurred (UTC)
+Fields:
+  _id                          string   stable id like "dsb_0001"
+  fecha_desemb                 string   disbursement period in YYYYMM format.
+                                        "202608" = August 2026. STRING, not a Date.
+  producto                     string   one of: ${PRODUCTOS.join(", ")}
+  canal_recalculado            string   commercial channel; one of: ${CANALES.join(", ")}
+  categoria                    string   product category; e.g. CREDITO, LEASING, MOTO, CONSUMO, CELULARES,
+                                        VEHICULOS, "CREDITO VEHICULO NUEVO", REESTRUCTURADO_VEHICULOS
+  subcategoria                 string   sub-category; e.g. PREGRADO, POSTGRADO, MOTO_GAMA_ALTA,
+                                        MOTO_GAMA_MEDIA, VEHICULOS, CREDITO_PARA_ESTUDIAR, SMARTPHONES
+  ciudad                       string   city name, or empty string when unknown
+  regional                     string   geographic zone; one of: ${REGIONALES.join(", ")}
+  feria                        string   campaign/fair code, or empty string when none
+  nuevo_usado                  string   asset condition: "Nuevo", "Usado", "Reutilizacion",
+                                        or empty string for products where it does not apply
+  total_creditos_desembolsados number   count of individual credits in this group (positive integer)
+  valor_total_desembolsado     number   total disbursed in full Colombian pesos (COP), NOT cents.
+                                        4986053190 means COP 4,986,053,190.
+  plazo_promedio               number   average loan term in months for credits in this group (may be
+                                        decimal, e.g. 61.30). Do NOT sum across records.
 
 Guidance for pipelines:
-  - "how much did user X move" => sum amount for that user, usually filtered to
-    transfer actions and/or status SUCCESS.
-  - "largest transfer this month" => filter action in the transfer actions and
-    timestamp within the current calendar month, sort amount descending.
-  - Amounts are integers in minor units; divide by 100 for display only, not in
-    the pipeline unless asked.
-  - timestamp is a real BSON Date. A plain string never matches a Date, so write
-    dates as Extended JSON: {"timestamp": {"$gte": {"$date": "2026-08-01T00:00:00Z"}}}
-    For windows relative to now, prefer $$NOW so the query stays correct later:
-    {"$match": {"$expr": {"$gte": ["$timestamp", {"$dateTrunc": {"date": "$$NOW", "unit": "month"}}]}}}
-  - Never assume the data is empty because a date filter returned nothing. Check
-    the filter's types first.`;
+  - "how much was disbursed / monto desembolsado?" => {$sum: "$valor_total_desembolsado"}
+  - "how many credits / cuántos créditos?" => {$sum: "$total_creditos_desembolsados"} NOT {$count:{}}
+  - "average term / plazo promedio ponderado?" => weighted average:
+      {$divide: [{$sum: {$multiply: ["$plazo_promedio","$total_creditos_desembolsados"]}},
+                 {$sum: "$total_creditos_desembolsados"}]}
+  - "by channel / por canal?" => $group on canal_recalculado
+  - "by period / por mes?" => $match or $group on fecha_desemb; current month = "202608",
+      previous month = "202607". Lexicographic order on YYYYMM strings is chronological.
+  - "top / ranking?" => $group → $sort descending → $limit 1 (or N)
+  - fecha_desemb is a STRING. Use {"$gte": "202601"} for range filters.
+      Never use $dateTrunc, $dateFromString, or $$NOW with this field.
+
+Traps:
+  - plazo_promedio is already an average per group — summing it is meaningless.
+      For a cross-group average, weight by total_creditos_desembolsados.
+  - valor_total_desembolsado is in full COP, not centavos. Never divide by 100.
+  - Empty string ("") in ciudad, feria, or nuevo_usado means "no data available".
+      It is not a valid category value. Filter with {"$ne": ""} when you want
+      only records that actually have that field populated.
+  - One document ≠ one credit. $count counts rows, not credits. Always $sum
+      total_creditos_desembolsados for a credit count.`;
 
 /**
  * Return a plain-language description of the target collection for the query
@@ -100,7 +122,7 @@ Guidance for pipelines:
  * their own data without editing this file first.
  */
 export function describeCollection(name: string): string {
-  if (name === "activity_events") return ACTIVITY_EVENTS_DESCRIPTION;
+  if (name === "desembolsos_oraculo") return DESEMBOLSOS_DESCRIPTION;
   // Falling through to this generic note means the model is guessing at your
   // fields. It usually still answers, which is exactly why this is easy to miss.
   // Register your collection above, following the checklist at the top.

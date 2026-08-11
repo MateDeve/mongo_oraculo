@@ -129,9 +129,10 @@ async function loadEvents(): Promise<number> {
   const events = generateActivityEvents(); // asserts internal consistency
   await collection.insertMany(events as unknown as Array<Record<string, unknown>>);
 
-  await collection.createIndex({ userId: 1 });
-  await collection.createIndex({ action: 1 });
-  await collection.createIndex({ timestamp: 1 });
+  await collection.createIndex({ fecha_desemb: 1 });
+  await collection.createIndex({ canal_recalculado: 1 });
+  await collection.createIndex({ regional: 1 });
+  await collection.createIndex({ producto: 1 });
 
   console.log(`  Events: ${events.length} documents into "${cfg.EVENTS_COLLECTION}" (+ indexes).`);
   return events.length;
