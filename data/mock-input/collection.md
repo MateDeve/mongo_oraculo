@@ -8,7 +8,7 @@ Fill in every section below, then run **Option A** from `prompts/phase-1-foundat
 
 - **Name:** `desembolsos_oraculo`  (must match `EVENTS_COLLECTION` in `.env`)
 - **One document is:** un conjunto de desembolsos de créditos agrupados por variables categóricas
-- **Approximate volume for the demo:** ~500 registros
+- **Approximate volume for the demo:** ~100 registros
 
 
 ## Fields
@@ -102,6 +102,10 @@ List every field whose value comes from a fixed set, and the allowed values.
 - Cuando la pregunta haga referencia a plazos, duración o financiación promedio, debe utilizarse `plazo_promedio`.
 
 - Cuando se solicite un ranking, un máximo, un mínimo o una comparación, el resultado debe calcularse únicamente a partir de los registros disponibles.
+
+- Todas las regionales deben tener desembolsos en todos los meses en todas sus categorias.
+
+- La variacion de los desembolsos no debe presentar cambios bruscos, deben presentar cambios realistas
 
 
 ## Verifiable facts (the anchors)
